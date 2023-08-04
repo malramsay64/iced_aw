@@ -35,6 +35,7 @@ pub struct Grid<'a, Message, Renderer = crate::Renderer> {
     strategy: Strategy,
     /// The elements in the [`Grid`](Grid).
     elements: Vec<Element<'a, Message, Renderer>>,
+    width: Length,
 }
 
 /// The [`Strategy`](Strategy) of how to distribute the columns of the [`Grid`](Grid).
@@ -44,6 +45,8 @@ pub enum Strategy {
     Columns(usize),
     /// Try to fit as much columns that have a fixed width.
     ColumnWidth(f32),
+    /// Try to fit as many columns as possible, always filling the space evenly.
+    ColumnWidthFlex(f32),
 }
 
 impl Default for Strategy {
@@ -70,6 +73,7 @@ where
         Self {
             strategy: Strategy::default(),
             elements: children,
+            ..Default::default()
         }
     }
 
@@ -80,6 +84,7 @@ where
         Self {
             strategy: Strategy::Columns(columns),
             elements: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -90,6 +95,7 @@ where
         Self {
             strategy: Strategy::ColumnWidth(column_width),
             elements: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -118,6 +124,13 @@ where
     {
         self.elements.push(element.into());
     }
+
+    /// Sets the width of the [`Grid`]
+    #[must_use]
+    pub fn width(mut self, width: impl Into<Length>) -> Self {
+        self.width = width.into();
+        self
+    }
 }
 
 impl<'a, Message, Renderer> Default for Grid<'a, Message, Renderer>
@@ -128,6 +141,7 @@ where
         Self {
             strategy: Strategy::default(),
             elements: Vec::new(),
+            width: Length::Shrink,
         }
     }
 }
@@ -145,7 +159,7 @@ where
     }
 
     fn width(&self) -> Length {
-        Length::Shrink
+        self.width
     }
 
     fn height(&self) -> Length {
@@ -205,6 +219,24 @@ where
                 let grid_width = (columns as f32) * column_width;
 
                 build_grid(columns, column_aligns, layouts, grid_width)
+            }
+            // find number of columns by checking how many can fit and align flexibly
+            Strategy::ColumnWidthFlex(column_width) => {
+                let max_width = limits.max().width;
+                let columns = (max_width / column_width).floor() as usize;
+                let column_limits = limits.width(Length::FillPortion(columns as u16));
+
+                let extra_width = (max_width - columns as f32 * column_width) / columns as f32;
+
+                let layouts = self
+                    .elements
+                    .iter()
+                    .map(|element| element.as_widget().layout(renderer, &column_limits));
+                let column_aligns = std::iter::successors(Some(extra_width / 2.), |width| {
+                    Some(width + column_width + extra_width)
+                });
+
+                build_grid(columns, column_aligns, layouts, max_width)
             }
         }
     }
